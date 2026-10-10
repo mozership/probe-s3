@@ -1,0 +1,293 @@
+# The end-to-end tests: Versity Gateway, which serves a directory over the S3
+# protocol and checks each signature, started in a container, and probe-s3
+# run against it, all in this one workflow. It runs under --allow-host, which
+# the action keeps to; the shell steps that run the container are let run
+# with --allow-action. Run it from the repository root, with the action built
+# first, as Probe resolves it before the first job:
+#
+#   go build -o e2e/action/probe-s3 . && probe --allow-host localhost --allow-action shell e2e/workflow.yml
+#
+# E2E_PORT is the port on this side, E2E_CONTAINER the container's name, and
+# E2E_KEEP=1 leaves the container running afterwards. PROBE is the probe the
+# last job runs e2e/read-only.yml with, which defaults to the one on PATH.
+name: probe-s3 against Versity Gateway
+
+vars:
+  # The release the tests are written against.
+  image: versity/versitygw:v1.8.0@sha256:30292fc2eeacc67a36993b01f7a7a5e3361a19cced0e80c1d71cfa2a4b0a2499
+  container: "{{E2E_CONTAINER ?? 'probe-s3-e2e'}}"
+  port: "{{E2E_PORT ?? '19000'}}"
+  endpoint: "http://localhost:{{vars.port}}"
+  keep: "{{E2E_KEEP ?? ''}}"
+  probe: "{{PROBE ?? 'probe'}}"
+  bucket: probe-e2e
+  access_key_id: probe
+  secret_access_key: "{{random_str(32)}}"
+  # A key with what has to be encoded in a path: a space, a plus and a
+  # character outside ASCII.
+  report: "reports/2026 Q3/été+plus.txt"
+
+jobs:
+- name: Start the storage
+  id: storage
+  steps:
+  # Before anything is started, so that whatever happens next, the container
+  # goes when the workflow ends: Probe stops a background command then, as it
+  # does when it is interrupted. E2E_KEEP=1 leaves it.
+  - name: Remove the container when the workflow ends
+    uses: shell
+    skipif: vars.keep == "1"
+    with:
+      cmd: "trap 'docker rm -f {{vars.container}} >/dev/null 2>&1; exit 0' TERM INT; while :; do sleep 1; done"
+      background: true
+    test: status == -1
+
+  # The gateway serves each directory under /data as a bucket, so the bucket
+  # is made before it starts: the action has no way to make one.
+  - name: Start Versity Gateway with a bucket
+    uses: shell
+    with:
+      cmd: >-
+        docker rm -f {{vars.container}} >/dev/null 2>&1;
+        docker run -d --name {{vars.container}}
+        -p {{vars.port}}:7070
+        --entrypoint sh
+        {{vars.image}}
+        -c 'mkdir -p /data/{{vars.bucket}} && exec versitygw --access {{vars.access_key_id}} --secret {{vars.secret_access_key}} posix /data'
+      timeout: 300s
+    test: res.code == 0
+
+  - name: Wait for the storage
+    uses: ./action
+    with:
+      endpoint: "{{vars.endpoint}}"
+      bucket: "{{vars.bucket}}"
+      access_key_id: "{{vars.access_key_id}}"
+      secret_access_key: "{{vars.secret_access_key}}"
+      list: ""
+    retry: {max_attempts: 60, interval: 1s}
+    test: status == 0 && res.count == 0 && res.truncated == false
+
+- name: Objects written and read back
+  id: objects
+  needs: [storage]
+  defaults:
+    ./action:
+      endpoint: "{{vars.endpoint}}"
+      bucket: "{{vars.bucket}}"
+      access_key_id: "{{vars.access_key_id}}"
+      secret_access_key: "{{vars.secret_access_key}}"
+  steps:
+  - name: Put a text object with metadata
+    id: put
+    uses: ./action
+    with:
+      put: "{{vars.report}}"
+      body: "Bonjour, été\n"
+      content_type: text/plain; charset=utf-8
+      metadata:
+        owner: probe
+        run: 7
+    test: |
+      status == 0 && res.code == 200 && res.etag != "" &&
+      req.signed == true && req.size == 15 &&
+      req.url == vars.endpoint + "/" + vars.bucket + "/reports/2026%20Q3/%C3%A9t%C3%A9%2Bplus.txt"
+    outputs:
+      etag: res.etag
+      sha256: req.sha256
+
+  - name: Head it
+    uses: ./action
+    with:
+      head: "{{vars.report}}"
+    test: |
+      status == 0 && res.code == 200 &&
+      res.size == 15 && res.etag == outputs.put.etag &&
+      res.content_type == "text/plain; charset=utf-8" &&
+      res.metadata.owner == "probe" && res.metadata.run == "7" &&
+      res.last_modified != ""
+
+  - name: Get it
+    uses: ./action
+    with:
+      get: "{{vars.report}}"
+    test: |
+      status == 0 && res.code == 200 &&
+      res.body == "Bonjour, été\n" && res.sha256 == outputs.put.sha256 &&
+      res.size == 15 && res.etag == outputs.put.etag &&
+      res.truncated == false && res.binary == false &&
+      res.metadata.owner == "probe"
+
+  - name: Put an object written as YAML, sent as JSON
+    uses: ./action
+    with:
+      put: config/app.json
+      body:
+        enabled: true
+        limits: [1, 2]
+    test: status == 0 && req.content_type == "application/json"
+
+  - name: Get it parsed
+    uses: ./action
+    with:
+      get: config/app.json
+    test: |
+      status == 0 &&
+      res.body.enabled == true && res.body.limits == [1, 2] &&
+      res.rawbody == '{"enabled":true,"limits":[1,2]}' &&
+      res.content_type == "application/json"
+
+  - name: Put a file
+    id: file
+    uses: ./action
+    with:
+      put: files/LICENSE
+      file: LICENSE
+    test: status == 0 && req.size > 1000
+    outputs:
+      file_sha256: req.sha256
+      file_size: req.size
+
+  - name: Get the file, whose digest is the one that was sent
+    uses: ./action
+    with:
+      get: files/LICENSE
+    test: |
+      status == 0 && res.sha256 == outputs.file.file_sha256 &&
+      res.size == outputs.file.file_size && res.body contains "Permission is hereby granted"
+
+  - name: Put an empty object
+    uses: ./action
+    with:
+      put: files/empty
+      body: ""
+    test: status == 0 && req.size == 0
+
+  # A list without a prefix, written with nothing after the key.
+  - name: List every object
+    uses: ./action
+    with:
+      list:
+    test: |
+      status == 0 && res.count == 4 && res.truncated == false &&
+      map(res.objects, #.key) == ["config/app.json", "files/LICENSE", "files/empty", vars.report]
+
+  - name: List under a prefix, the key read as it was written
+    uses: ./action
+    with:
+      list: "reports/2026 Q3/"
+    test: |
+      status == 0 && res.count == 1 &&
+      res.objects[0].key == vars.report && res.objects[0].size == 15 &&
+      res.objects[0].etag == outputs.put.etag && res.objects[0].last_modified != ""
+
+  - name: List no more than one
+    uses: ./action
+    with:
+      list: files/
+      max_keys: 1
+    test: status == 0 && res.count == 1 && res.truncated == true && res.objects[0].key == "files/LICENSE"
+
+- name: What the storage refuses is a result
+  id: refusals
+  needs: [objects]
+  defaults:
+    ./action:
+      endpoint: "{{vars.endpoint}}"
+      bucket: "{{vars.bucket}}"
+      access_key_id: "{{vars.access_key_id}}"
+      secret_access_key: "{{vars.secret_access_key}}"
+  steps:
+  - name: A key that is not there
+    uses: ./action
+    with:
+      get: files/none
+    test: status == 1 && res.code == 404 && res.error_code == "NoSuchKey" && res.error_message != ""
+
+  - name: The same, by head, which has no body to say why
+    uses: ./action
+    with:
+      head: files/none
+    test: status == 1 && res.code == 404 && res.error_code == ""
+
+  - name: A bucket that is not there
+    uses: ./action
+    with:
+      bucket: probe-e2e-none
+      list: ""
+    test: status == 1 && res.code == 404 && res.error_code == "NoSuchBucket"
+
+  # The storage works out the signature itself, so a wrong key is told here,
+  # and a right one was told in every step above.
+  - name: A wrong secret access key
+    uses: ./action
+    with:
+      secret_access_key: not-the-secret-access-key
+      get: files/LICENSE
+    test: status == 1 && res.code == 403 && res.error_code == "SignatureDoesNotMatch"
+
+  - name: A wrong secret access key, writing
+    uses: ./action
+    with:
+      secret_access_key: not-the-secret-access-key
+      put: files/LICENSE
+      body: overwritten
+    test: status == 1 && res.code == 403 && res.error_code == "SignatureDoesNotMatch"
+
+- name: Under --read-only
+  id: read_only
+  needs: [refusals]
+  steps:
+  # Probe is run again, read-only, on a workflow that reads and then writes.
+  # A step the guard refuses ends that run with the exit code 2.
+  - name: Reads are run and a write is refused
+    uses: shell
+    with:
+      cmd: "{{vars.probe}} --read-only --allow-host localhost:{{vars.port}} e2e/read-only.yml"
+      env:
+        E2E_ENDPOINT: "{{vars.endpoint}}"
+        E2E_BUCKET: "{{vars.bucket}}"
+        E2E_ACCESS_KEY_ID: "{{vars.access_key_id}}"
+        E2E_SECRET_ACCESS_KEY: "{{vars.secret_access_key}}"
+      timeout: 120s
+    test: |
+      res.code == 2 &&
+      (res.stdout + res.stderr) contains "put writes to the bucket, and the run is read-only"
+    echo: "{{res.stdout}}{{res.stderr}}"
+
+  - name: The object the refused step would have replaced is as it was
+    uses: ./action
+    with:
+      endpoint: "{{vars.endpoint}}"
+      bucket: "{{vars.bucket}}"
+      access_key_id: "{{vars.access_key_id}}"
+      secret_access_key: "{{vars.secret_access_key}}"
+      get: files/LICENSE
+    test: status == 0 && res.sha256 == outputs.file.file_sha256
+
+- name: Objects deleted
+  needs: [read_only]
+  defaults:
+    ./action:
+      endpoint: "{{vars.endpoint}}"
+      bucket: "{{vars.bucket}}"
+      access_key_id: "{{vars.access_key_id}}"
+      secret_access_key: "{{vars.secret_access_key}}"
+  steps:
+  - name: Delete an object
+    uses: ./action
+    with:
+      delete: "{{vars.report}}"
+    test: status == 0 && res.code == 204
+
+  - name: It is gone
+    uses: ./action
+    with:
+      get: "{{vars.report}}"
+    test: status == 1 && res.code == 404 && res.error_code == "NoSuchKey"
+
+  - name: And so is its key
+    uses: ./action
+    with:
+      list: reports/
+    test: status == 0 && res.count == 0

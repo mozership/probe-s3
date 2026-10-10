@@ -1,0 +1,198 @@
+# probe-s3
+
+A [Probe](https://github.com/mozership/probe) action that reads and writes objects in S3 and in storage that speaks its protocol, such as MinIO, Cloudflare R2 or Versity Gateway.
+
+Probe downloads it the first time a workflow uses it. It needs Probe v1.21.0 or later, which reads the guard and the params the action declares in `action.yml`.
+
+```yaml
+name: Upload
+jobs:
+- name: upload
+  steps:
+  - name: Upload an avatar through the API
+    id: upload
+    uses: http
+    with:
+      url: https://api.example.com
+      post: /avatars
+      multipart:
+        image:
+          file: ./fixtures/logo.png
+    test: res.code == 201
+    outputs:
+      key: res.body.key
+
+  - name: The object is in the bucket, as it was sent
+    uses: github.com/mozership/probe-s3@<commit SHA>
+    with:
+      bucket: example-avatars
+      region: ap-northeast-1
+      head: "{{outputs.upload.key}}"
+    test: res.code == 200 && res.content_type == "image/png" && res.metadata.owner == "42"
+```
+
+Probe only takes a full 40-character commit SHA. The notes of each [release](https://github.com/mozership/probe-s3/releases) start with the `uses` line to copy.
+
+A step does one operation on one bucket. It cannot make or remove a bucket.
+
+## Parameters
+
+A step names its operation by one of these keys, and has exactly one of them.
+
+| Key | Value | What it does |
+|---|---|---|
+| `get` | The key of an object | Reads the object: its content, its digest and what its headers tell |
+| `head` | The key of an object | Reads what the headers tell of the object, without its content |
+| `list` | A prefix, or nothing | Lists the objects whose keys start with the prefix, or every object |
+| `put` | The key of an object | Writes the object, from `body` or from `file` |
+| `delete` | The key of an object | Deletes the object |
+
+The others say where the bucket is and how to sign the request.
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `bucket` | String | Yes | - | The bucket |
+| `region` | String | No | `AWS_REGION`, `AWS_DEFAULT_REGION`, or `us-east-1` | The region the request is signed for, and on AWS the one it is sent to |
+| `endpoint` | String | No | AWS | Where S3-compatible storage is served, as `http://localhost:9000` or `https://<account>.r2.cloudflarestorage.com` |
+| `path_style` | Boolean | No | See below | Addresses the bucket in the path, as `<endpoint>/<bucket>/<key>`, rather than in the host, as `<bucket>.<endpoint>/<key>` |
+| `access_key_id` | String | No | `AWS_ACCESS_KEY_ID` | The access key |
+| `secret_access_key` | String | No | `AWS_SECRET_ACCESS_KEY` | The secret access key |
+| `session_token` | String | No | `AWS_SESSION_TOKEN` | The session token of temporary credentials |
+| `body` | String, or any other value | For `put`, unless `file` | - | What a `put` writes: a string as it is, anything else as JSON, with the content type `application/json` unless `content_type` says otherwise |
+| `file` | String | For `put`, unless `body` | - | Path to the file a `put` writes, relative to the working directory |
+| `content_type` | String | No | - | The media type a `put` stores with the object |
+| `metadata` | Object | No | - | The metadata a `put` stores with the object, sent as `x-amz-meta-<name>`. Names are lowercased, and values must be printable ASCII |
+| `max_keys` | Integer | No | The storage's, `1000` on S3 | The most objects a `list` returns |
+| `timeout` | Duration | No | `30s` | Time limit for the whole step, as `10s` or a number of seconds. `0` removes it |
+
+A key of `with` that is not one of these fails the step before anything is sent, and `probe check` reports it with its line. A parameter given to an operation that does not take it, such as `body` with `get`, fails the step the same way.
+
+`path_style` defaults to `true` with an `endpoint`, as MinIO and the like are served under one name, and to `false` on AWS, except for a bucket with a dot in its name, which the certificate of `*.s3.<region>.amazonaws.com` does not cover.
+
+### Credentials
+
+When `with` has none of `access_key_id`, `secret_access_key` and `session_token`, the action reads `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `AWS_SESSION_TOKEN` from the environment Probe runs in. Without credentials in either place, the request is sent unsigned, as a public bucket takes it. The action reads no profile, no instance metadata and no other source of credentials, so it connects to nothing but the storage.
+
+Leave the credentials to the environment where you can. A secret access key written in `with` is not shown in the result, in a report or in the action's own log, but `probe --verbose` prints the parameters each action is called with, and it hides only the values Probe knows to be credentials. Declare the variable under [`secrets`](https://probe.linyo.ws/reference/yaml-configuration#secrets) when you pass one through `with`:
+
+```yaml
+vars:
+  storage_secret: "{{STORAGE_SECRET_ACCESS_KEY}}"
+secrets:
+  - STORAGE_SECRET_ACCESS_KEY
+```
+
+## Result
+
+| Field | Type | Description |
+|---|---|---|
+| `res.code` | Integer | HTTP status code, such as `200`, or `204` for a `delete` |
+| `res.status` | String | HTTP status line, such as `"200 OK"` |
+| `res.headers` | Object | Response headers, keyed by canonical name such as `Content-Type` |
+| `res.error_code` | String | The error the storage answered with, such as `NoSuchKey`, `NoSuchBucket`, `AccessDenied` or `SignatureDoesNotMatch`, or empty. A `head` has no body to carry it, so it is empty for one |
+| `res.error_message` | String | What the storage said of the error, or empty |
+| `req` | Object | What was done: `operation`, `bucket`, `region`, `endpoint`, `path_style`, the `url` the answer came from, and `signed`, with the `key` of the object, or the `prefix` and `max_keys` of a list. A `put` also has `body`, `file`, `content_type`, `metadata`, and the `size` and `sha256` of what it sent. It never has the credentials |
+| `rt` | Duration | Time the step took |
+| `status` | Integer | `0` when the status code is 2xx; `1` otherwise |
+
+A `get` and a `head` add what the headers tell of the object.
+
+| Field | Type | Description |
+|---|---|---|
+| `res.etag` | String | The ETag, without its quotes |
+| `res.size` | Integer | Size in bytes |
+| `res.content_type` | String | The media type stored with the object |
+| `res.last_modified` | String | When it was last written, as `2026-10-10T01:02:03Z` |
+| `res.metadata` | Object | The metadata stored with the object, by lowercased name, without `x-amz-meta-` |
+
+A `get` adds the content.
+
+| Field | Type | Description |
+|---|---|---|
+| `res.body` | Any | The content as text. Parsed into an object or array when `res.content_type` says JSON and it is JSON. Empty for a binary object |
+| `res.rawbody` | String | The unparsed content, present when it was parsed as JSON |
+| `res.sha256` | String | SHA-256 digest of the whole object, in hex |
+| `res.truncated` | Boolean | Whether the object is larger than 1 MiB, of which `res.body` holds the first |
+| `res.binary` | Boolean | Whether the content is not UTF-8 text, and so not in `res.body` |
+
+`res.sha256` and `res.size` are of the whole object however large it is, so a binary or large object is checked by them, against the `req.sha256` of the step that wrote it or a digest you know.
+
+A `put` adds `res.etag`. A `list` adds these.
+
+| Field | Type | Description |
+|---|---|---|
+| `res.objects` | Array | The objects, in the order of their keys, each with `key`, `size`, `etag` and `last_modified` |
+| `res.count` | Integer | How many objects `res.objects` has |
+| `res.truncated` | Boolean | Whether the storage has more objects than it returned |
+
+Once the storage answers, what it answered is a result, so a test can assert on a `404` for a key that should be gone or a `403` for a bucket that should be closed. Only a request that gets no answer, such as a refused connection or a timeout, fails the step as an error.
+
+## Examples
+
+Against AWS, with the credentials of the environment:
+
+```yaml
+- name: The export is there and not empty
+  uses: github.com/mozership/probe-s3@<commit SHA>
+  with:
+    bucket: example-exports
+    region: ap-northeast-1
+    list: "daily/{{vars.today}}/"
+  test: res.code == 200 && res.count > 0 && all(res.objects, #.size > 0)
+```
+
+Against MinIO, writing a fixture and reading it back. The job's `defaults` keep the endpoint, the bucket and the credentials out of each step:
+
+```yaml
+- name: fixtures
+  defaults:
+    github.com/mozership/probe-s3@<commit SHA>:
+      endpoint: http://localhost:9000
+      bucket: fixtures
+      access_key_id: "{{vars.minio_user}}"
+      secret_access_key: "{{vars.minio_password}}"
+  steps:
+  - name: Put a fixture
+    id: put
+    uses: github.com/mozership/probe-s3@<commit SHA>
+    with:
+      put: config/app.json
+      body:
+        enabled: true
+    test: res.code == 200
+    outputs:
+      sha256: req.sha256
+
+  - name: Get it
+    uses: github.com/mozership/probe-s3@<commit SHA>
+    with:
+      get: config/app.json
+    test: res.body.enabled == true && res.sha256 == outputs.put.sha256
+
+  - name: A key that must not be there
+    uses: github.com/mozership/probe-s3@<commit SHA>
+    with:
+      head: config/removed.json
+    test: res.code == 404
+```
+
+## Redirects
+
+On AWS, a bucket that is not in the region the request was signed for is read from the region AWS names in its answer. A `Location` the storage answers with is followed too, up to 5 times, when it stays within the storage: under `amazonaws.com`, or the host of `endpoint` and the names under it. Each request is signed again for where it goes. A redirect to anywhere else is not followed, and is the result.
+
+## Guard
+
+The action keeps to the guard of the run, and its `action.yml` declares `guard: [read-only, allow-host]`, so Probe runs it under `--read-only` and `--allow-host` without `--allow-action`.
+
+- Under `--read-only`, only `get`, `head` and `list` are run. A `put` or a `delete` is refused before anything is sent, and before `file` is read.
+- Under `--allow-host`, every host a request goes to must be one the run allows: the host the bucket is addressed at, which on AWS is `<bucket>.s3.<region>.amazonaws.com`, or `s3.<region>.amazonaws.com` with `path_style`, and the host of each redirect. A URL without a port is taken at the port of its scheme: `80` for `http` and `443` for `https`. `--allow-host '*.amazonaws.com'` allows a bucket in whichever region it is.
+
+A refused step fails with the kind `refused`.
+
+## Releasing
+
+Pushing a `v*` tag builds the executables with GoReleaser and publishes them on the release. The workflow then has `probe manifest` write an `action.yml` with their URLs and SHA-256 digests, commits it to `main`, and adds the commit to the release notes. The name, the description, `guard` and `params` are those of the `action.yml` at the tag, so that file is where to change them. That commit is the one to pin: Probe reads `action.yml` at the pinned commit and refuses an executable whose digest differs.
+
+## License
+
+MIT

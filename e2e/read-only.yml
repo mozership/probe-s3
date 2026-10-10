@@ -1,0 +1,47 @@
+# Run by e2e/workflow.yml under --read-only, against the storage it started:
+# the steps that read are run, and the one that writes is refused, which
+# ends the run with the exit code 2.
+name: probe-s3 under --read-only
+
+vars:
+  endpoint: "{{E2E_ENDPOINT}}"
+  bucket: "{{E2E_BUCKET}}"
+  access_key_id: "{{E2E_ACCESS_KEY_ID}}"
+  secret_access_key: "{{E2E_SECRET_ACCESS_KEY}}"
+
+secrets:
+  - E2E_SECRET_ACCESS_KEY
+
+jobs:
+- name: Read, then write
+  defaults:
+    ./action:
+      endpoint: "{{vars.endpoint}}"
+      bucket: "{{vars.bucket}}"
+      access_key_id: "{{vars.access_key_id}}"
+      secret_access_key: "{{vars.secret_access_key}}"
+  steps:
+  - name: Get
+    uses: ./action
+    with:
+      get: files/LICENSE
+    test: status == 0 && res.body contains "Permission is hereby granted"
+
+  - name: Head
+    uses: ./action
+    with:
+      head: files/LICENSE
+    test: status == 0 && res.size > 1000
+
+  - name: List
+    uses: ./action
+    with:
+      list: files/
+    test: status == 0 && res.count == 2
+
+  - name: Put
+    uses: ./action
+    with:
+      put: files/LICENSE
+      body: overwritten
+    test: status == 0

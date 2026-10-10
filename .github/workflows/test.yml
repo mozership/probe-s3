@@ -1,0 +1,43 @@
+name: Test
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - run: go test -race ./...
+
+  # The tests above answer from a stand-in, which checks no signature. This
+  # one runs the action through Probe against Versity Gateway, a server none
+  # of it was written against, which works out each signature itself.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          go-version-file: go.mod
+      # Probe resolves the action before the first job of the workflow, so it
+      # is built first.
+      - run: go build -o e2e/action/probe-s3 .
+      # The probe the e2e workflow runs, and runs again under --read-only.
+      # The action checks it against the digest of its release and adds it
+      # to PATH.
+      - name: Install Probe
+        uses: mozership/probe-action@831b8b6c6aa0c8a61aa75b58f36a08da5c579e83 # v1.3.0
+        with:
+          install-only: true
+          version: v1.23.0
+      # Under --allow-host, which the action keeps to. The shell steps that
+      # run the container are let run with --allow-action.
+      - run: probe --allow-host localhost --allow-action shell --report github-summary e2e/workflow.yml

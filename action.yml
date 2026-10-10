@@ -1,0 +1,7 @@
+name: s3
+description: Read and write objects in S3 and S3-compatible storage
+guard: [read-only, allow-host]
+params: [get, head, list, put, delete, bucket, region, endpoint, path_style, access_key_id, secret_access_key, session_token, body, file, content_type, metadata, max_keys, timeout]
+runs:
+  using: binary
+  url: https://github.com/mozership/probe-s3/releases/download/v0.0.0/probe-s3_{os}_{arch}

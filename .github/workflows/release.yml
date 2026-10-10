@@ -1,0 +1,65 @@
+name: Release
+on:
+  push:
+    tags:
+      - 'v*'
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+      - name: Set up Go
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          go-version-file: go.mod
+      # The probe that writes action.yml. The action checks it against the
+      # digest of its release and adds it to PATH. It is installed before the
+      # release is published, so that a failure here leaves no release behind.
+      - name: Install Probe
+        uses: mozership/probe-action@831b8b6c6aa0c8a61aa75b58f36a08da5c579e83 # v1.3.0
+        with:
+          install-only: true
+          version: v1.23.0
+          # A run for a tag has a cache of its own, which no later run reads.
+          cache: false
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Probe reads action.yml at the commit a step pins, so the digests of
+      # this release are committed to main, and that commit is what users pin.
+      # probe manifest keeps what action.yml declares, and puts this tag in
+      # runs.url and the digests of this release in runs.checksums.
+      - name: Commit action.yml for this release
+        run: |
+          probe manifest "$GITHUB_REF_NAME" dist/checksums.txt > "$RUNNER_TEMP/action.yml"
+          git switch main
+          cp "$RUNNER_TEMP/action.yml" action.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add action.yml
+          git commit -m "Point action.yml at $GITHUB_REF_NAME"
+          git push origin main
+          echo "USES=github.com/${GITHUB_REPOSITORY}@$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+      - name: Add the pinned reference to the release notes
+        run: |
+          {
+            echo '```yaml'
+            echo "uses: ${USES} # ${GITHUB_REF_NAME}"
+            echo '```'
+            echo
+            gh release view "$GITHUB_REF_NAME" --json body -q .body
+          } > "$RUNNER_TEMP/notes.md"
+          gh release edit "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
+          echo "\`uses: ${USES}\`" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
