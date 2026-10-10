@@ -6,6 +6,8 @@ Probe downloads it the first time a workflow uses it. It needs Probe v1.21.0 or 
 
 ```yaml
 name: Upload
+actions:
+  s3: github.com/mozership/probe-s3@<commit SHA>
 jobs:
 - name: upload
   steps:
@@ -23,7 +25,7 @@ jobs:
       key: res.body.key
 
   - name: The object is in the bucket, as it was sent
-    uses: github.com/mozership/probe-s3@<commit SHA>
+    uses: s3
     with:
       bucket: example-avatars
       region: ap-northeast-1
@@ -31,7 +33,9 @@ jobs:
     test: res.code == 200 && res.content_type == "image/png" && res.metadata.owner == "42"
 ```
 
-Probe only takes a full 40-character commit SHA. The notes of each [release](https://github.com/mozership/probe-s3/releases) start with the `uses` line to copy.
+The workflow gives the action a name once, under `actions`, and its steps use the name. Probe only takes a full 40-character commit SHA there. The notes of each [release](https://github.com/mozership/probe-s3/releases) start with the action and its commit to copy.
+
+`actions` needs Probe v1.24.0 or later. With an earlier one, write the action in full in each `uses`, as `uses: github.com/mozership/probe-s3@<commit SHA>`.
 
 A step does one operation on one bucket. It cannot make or remove a bucket.
 
@@ -133,7 +137,7 @@ Against AWS, with the credentials of the environment:
 
 ```yaml
 - name: The export is there and not empty
-  uses: github.com/mozership/probe-s3@<commit SHA>
+  uses: s3
   with:
     bucket: example-exports
     region: ap-northeast-1
@@ -141,12 +145,12 @@ Against AWS, with the credentials of the environment:
   test: res.code == 200 && res.count > 0 && all(res.objects, #.size > 0)
 ```
 
-Against MinIO, writing a fixture and reading it back. The job's `defaults` keep the endpoint, the bucket and the credentials out of each step:
+Against MinIO, writing a fixture and reading it back. The job's `defaults`, keyed by the name the workflow gave the action, keep the endpoint, the bucket and the credentials out of each step:
 
 ```yaml
 - name: fixtures
   defaults:
-    github.com/mozership/probe-s3@<commit SHA>:
+    s3:
       endpoint: http://localhost:9000
       bucket: fixtures
       access_key_id: "{{vars.minio_user}}"
@@ -154,7 +158,7 @@ Against MinIO, writing a fixture and reading it back. The job's `defaults` keep 
   steps:
   - name: Put a fixture
     id: put
-    uses: github.com/mozership/probe-s3@<commit SHA>
+    uses: s3
     with:
       put: config/app.json
       body:
@@ -164,13 +168,13 @@ Against MinIO, writing a fixture and reading it back. The job's `defaults` keep 
       sha256: req.sha256
 
   - name: Get it
-    uses: github.com/mozership/probe-s3@<commit SHA>
+    uses: s3
     with:
       get: config/app.json
     test: res.body.enabled == true && res.sha256 == outputs.put.sha256
 
   - name: A key that must not be there
-    uses: github.com/mozership/probe-s3@<commit SHA>
+    uses: s3
     with:
       head: config/removed.json
     test: res.code == 404
