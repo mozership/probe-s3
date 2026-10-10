@@ -4,4 +4,9 @@ guard: [read-only, allow-host]
 params: [get, head, list, put, delete, bucket, region, endpoint, path_style, access_key_id, secret_access_key, session_token, body, file, content_type, metadata, max_keys, timeout]
 runs:
   using: binary
-  url: https://github.com/mozership/probe-s3/releases/download/v0.0.0/probe-s3_{os}_{arch}
+  url: https://github.com/mozership/probe-s3/releases/download/v0.1.0/probe-s3_{os}_{arch}
+  checksums:
+    darwin_amd64: "99ce285c1c2d94ace72147736a271d97841c3fa5f9ad887a01e368122cafffd2"
+    darwin_arm64: "8c0cc5a6a957a77a23474801ca980d89571575715c8e19b1022d6d4ea8049272"
+    linux_amd64: "a2fdc376e3fe86f156c915c8f7d714b83bcf41a256133e1d19d43af90a2764ac"
+    linux_arm64: "31f8c4eb4766eb9c02a26d340ca75e94582e9d9baf23e530a81e4d60e22018e2"
