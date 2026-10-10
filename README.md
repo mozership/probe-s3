@@ -142,7 +142,7 @@ Against AWS, with the credentials of the environment:
     bucket: example-exports
     region: ap-northeast-1
     list: "daily/{{vars.today}}/"
-  test: res.code == 200 && res.count > 0 && all(res.objects, #.size > 0)
+  test: "res.code == 200 && res.count > 0 && all(res.objects, #.size > 0)"
 ```
 
 Against MinIO, writing a fixture and reading it back. The job's `defaults`, keyed by the name the workflow gave the action, keep the endpoint, the bucket and the credentials out of each step:
