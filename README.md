@@ -77,7 +77,7 @@ A key of `with` that is not one of these fails the step before anything is sent,
 
 When `with` has none of `access_key_id`, `secret_access_key` and `session_token`, the action reads `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `AWS_SESSION_TOKEN` from the environment Probe runs in. Without credentials in either place, the request is sent unsigned, as a public bucket takes it. The action reads no profile, no instance metadata and no other source of credentials, so it connects to nothing but the storage.
 
-Leave the credentials to the environment where you can. A secret access key written in `with` is not shown in the result, in a report or in the action's own log, but `probe --verbose` prints the parameters each action is called with, and it hides only the values Probe knows to be credentials. Declare the variable under [`secrets`](https://probe.linyo.ws/reference/yaml-configuration#secrets) when you pass one through `with`:
+Leave the credentials to the environment where you can. A secret access key written in `with` is not shown in the result, in a report or in the action's own log. Probe v1.24.0 and later also shows the values of `secret_access_key` and `session_token` as `<redacted>` wherever it shows the parameters of a step, as `probe --verbose` does; an earlier Probe prints them there as they were written. Declaring the variable under [`secrets`](https://probe.linyo.ws/reference/yaml-configuration#secrets) hides its value with any Probe, and anywhere else it could appear, such as an `echo`:
 
 ```yaml
 vars:

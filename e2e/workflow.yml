@@ -12,6 +12,11 @@
 # last job runs e2e/read-only.yml with, which defaults to the one on PATH.
 name: probe-s3 against Versity Gateway
 
+# The action as it was just built, by the name a workflow would give a
+# released one.
+actions:
+  s3: ./action
+
 vars:
   # The release the tests are written against.
   image: versity/versitygw:v1.8.0@sha256:30292fc2eeacc67a36993b01f7a7a5e3361a19cced0e80c1d71cfa2a4b0a2499
@@ -58,7 +63,7 @@ jobs:
     test: res.code == 0
 
   - name: Wait for the storage
-    uses: ./action
+    uses: s3
     with:
       endpoint: "{{vars.endpoint}}"
       bucket: "{{vars.bucket}}"
@@ -72,7 +77,7 @@ jobs:
   id: objects
   needs: [storage]
   defaults:
-    ./action:
+    s3:
       endpoint: "{{vars.endpoint}}"
       bucket: "{{vars.bucket}}"
       access_key_id: "{{vars.access_key_id}}"
@@ -80,7 +85,7 @@ jobs:
   steps:
   - name: Put a text object with metadata
     id: put
-    uses: ./action
+    uses: s3
     with:
       put: "{{vars.report}}"
       body: "Bonjour, été\n"
@@ -97,7 +102,7 @@ jobs:
       sha256: req.sha256
 
   - name: Head it
-    uses: ./action
+    uses: s3
     with:
       head: "{{vars.report}}"
     test: |
@@ -108,7 +113,7 @@ jobs:
       res.last_modified != ""
 
   - name: Get it
-    uses: ./action
+    uses: s3
     with:
       get: "{{vars.report}}"
     test: |
@@ -119,7 +124,7 @@ jobs:
       res.metadata.owner == "probe"
 
   - name: Put an object written as YAML, sent as JSON
-    uses: ./action
+    uses: s3
     with:
       put: config/app.json
       body:
@@ -128,7 +133,7 @@ jobs:
     test: status == 0 && req.content_type == "application/json"
 
   - name: Get it parsed
-    uses: ./action
+    uses: s3
     with:
       get: config/app.json
     test: |
@@ -139,7 +144,7 @@ jobs:
 
   - name: Put a file
     id: file
-    uses: ./action
+    uses: s3
     with:
       put: files/LICENSE
       file: LICENSE
@@ -149,7 +154,7 @@ jobs:
       file_size: req.size
 
   - name: Get the file, whose digest is the one that was sent
-    uses: ./action
+    uses: s3
     with:
       get: files/LICENSE
     test: |
@@ -157,7 +162,7 @@ jobs:
       res.size == outputs.file.file_size && res.body contains "Permission is hereby granted"
 
   - name: Put an empty object
-    uses: ./action
+    uses: s3
     with:
       put: files/empty
       body: ""
@@ -165,7 +170,7 @@ jobs:
 
   # A list without a prefix, written with nothing after the key.
   - name: List every object
-    uses: ./action
+    uses: s3
     with:
       list:
     test: |
@@ -173,7 +178,7 @@ jobs:
       map(res.objects, #.key) == ["config/app.json", "files/LICENSE", "files/empty", vars.report]
 
   - name: List under a prefix, the key read as it was written
-    uses: ./action
+    uses: s3
     with:
       list: "reports/2026 Q3/"
     test: |
@@ -182,7 +187,7 @@ jobs:
       res.objects[0].etag == outputs.put.etag && res.objects[0].last_modified != ""
 
   - name: List no more than one
-    uses: ./action
+    uses: s3
     with:
       list: files/
       max_keys: 1
@@ -192,26 +197,26 @@ jobs:
   id: refusals
   needs: [objects]
   defaults:
-    ./action:
+    s3:
       endpoint: "{{vars.endpoint}}"
       bucket: "{{vars.bucket}}"
       access_key_id: "{{vars.access_key_id}}"
       secret_access_key: "{{vars.secret_access_key}}"
   steps:
   - name: A key that is not there
-    uses: ./action
+    uses: s3
     with:
       get: files/none
     test: status == 1 && res.code == 404 && res.error_code == "NoSuchKey" && res.error_message != ""
 
   - name: The same, by head, which has no body to say why
-    uses: ./action
+    uses: s3
     with:
       head: files/none
     test: status == 1 && res.code == 404 && res.error_code == ""
 
   - name: A bucket that is not there
-    uses: ./action
+    uses: s3
     with:
       bucket: probe-e2e-none
       list: ""
@@ -220,14 +225,14 @@ jobs:
   # The storage works out the signature itself, so a wrong key is told here,
   # and a right one was told in every step above.
   - name: A wrong secret access key
-    uses: ./action
+    uses: s3
     with:
       secret_access_key: not-the-secret-access-key
       get: files/LICENSE
     test: status == 1 && res.code == 403 && res.error_code == "SignatureDoesNotMatch"
 
   - name: A wrong secret access key, writing
-    uses: ./action
+    uses: s3
     with:
       secret_access_key: not-the-secret-access-key
       put: files/LICENSE
@@ -256,7 +261,7 @@ jobs:
     echo: "{{res.stdout}}{{res.stderr}}"
 
   - name: The object the refused step would have replaced is as it was
-    uses: ./action
+    uses: s3
     with:
       endpoint: "{{vars.endpoint}}"
       bucket: "{{vars.bucket}}"
@@ -268,26 +273,26 @@ jobs:
 - name: Objects deleted
   needs: [read_only]
   defaults:
-    ./action:
+    s3:
       endpoint: "{{vars.endpoint}}"
       bucket: "{{vars.bucket}}"
       access_key_id: "{{vars.access_key_id}}"
       secret_access_key: "{{vars.secret_access_key}}"
   steps:
   - name: Delete an object
-    uses: ./action
+    uses: s3
     with:
       delete: "{{vars.report}}"
     test: status == 0 && res.code == 204
 
   - name: It is gone
-    uses: ./action
+    uses: s3
     with:
       get: "{{vars.report}}"
     test: status == 1 && res.code == 404 && res.error_code == "NoSuchKey"
 
   - name: And so is its key
-    uses: ./action
+    uses: s3
     with:
       list: reports/
     test: status == 0 && res.count == 0

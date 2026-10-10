@@ -3,6 +3,9 @@
 # ends the run with the exit code 2.
 name: probe-s3 under --read-only
 
+actions:
+  s3: ./action
+
 vars:
   endpoint: "{{E2E_ENDPOINT}}"
   bucket: "{{E2E_BUCKET}}"
@@ -15,32 +18,32 @@ secrets:
 jobs:
 - name: Read, then write
   defaults:
-    ./action:
+    s3:
       endpoint: "{{vars.endpoint}}"
       bucket: "{{vars.bucket}}"
       access_key_id: "{{vars.access_key_id}}"
       secret_access_key: "{{vars.secret_access_key}}"
   steps:
   - name: Get
-    uses: ./action
+    uses: s3
     with:
       get: files/LICENSE
     test: status == 0 && res.body contains "Permission is hereby granted"
 
   - name: Head
-    uses: ./action
+    uses: s3
     with:
       head: files/LICENSE
     test: status == 0 && res.size > 1000
 
   - name: List
-    uses: ./action
+    uses: s3
     with:
       list: files/
     test: status == 0 && res.count == 2
 
   - name: Put
-    uses: ./action
+    uses: s3
     with:
       put: files/LICENSE
       body: overwritten
