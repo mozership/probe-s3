@@ -5,7 +5,7 @@ package main
 
 import (
 	"github.com/hashicorp/go-hclog"
-	"github.com/linyows/probe/actionrpc"
+	"github.com/mozership/probe/actionrpc"
 )
 
 // version is set at build time.
