@@ -23,8 +23,8 @@ import (
 	"time"
 
 	"github.com/hashicorp/go-hclog"
-	"github.com/linyows/probe/actionref"
-	"github.com/linyows/probe/actionrpc"
+	"github.com/mozership/probe/actionref"
+	"github.com/mozership/probe/actionrpc"
 )
 
 // object is what the stand-in for S3 keeps for a key.
