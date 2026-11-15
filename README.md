@@ -1,8 +1,8 @@
 # probe-s3
 
-A [Probe](https://github.com/mozership/probe) action that reads and writes objects in S3 and in storage that speaks its protocol, such as MinIO, Cloudflare R2 or Versity Gateway.
+A [Probe](https://github.com/mozership/probe) action that reads and writes objects in S3 and in storage that speaks its protocol, such as MinIO, Cloudflare R2 or Versity Gateway, so a workflow can check what an API stored.
 
-Probe downloads it the first time a workflow uses it. It needs Probe v1.21.0 or later, which reads the guard and the params the action declares in `action.yml`.
+It is an [external action](https://probe.linyo.ws/guide/concepts/actions#external-actions). Probe downloads it the first time a workflow uses it, and runs the executable whose SHA-256 the `action.yml` at the pinned commit names. It needs Probe v1.21.0 or later, which reads the guard and the params the action declares in `action.yml`.
 
 ```yaml
 name: Upload
@@ -69,9 +69,11 @@ The others say where the bucket is and how to sign the request.
 | `max_keys` | Integer | No | The storage's, `1000` on S3 | The most objects a `list` returns |
 | `timeout` | Duration | No | `30s` | Time limit for the whole step, as `10s` or a number of seconds. `0` removes it |
 
-A key of `with` that is not one of these fails the step before anything is sent, and `probe check` reports it with its line. A parameter given to an operation that does not take it, such as `body` with `get`, fails the step the same way.
+A key of `with` that is not one of these fails the step before anything is sent. Its `action.yml` declares them as `params`, so `probe check` reports such a key with its line. A parameter given to an operation that does not take it, such as `body` with `get`, fails the step the same way.
 
 `path_style` defaults to `true` with an `endpoint`, as MinIO and the like are served under one name, and to `false` on AWS, except for a bucket with a dot in its name, which the certificate of `*.s3.<region>.amazonaws.com` does not cover.
+
+A `list` returns one page: at most `max_keys` objects, with `res.truncated` telling whether the storage has more. Multipart uploads are not supported.
 
 ### Credentials
 
@@ -148,6 +150,13 @@ Against AWS, with the credentials of the environment:
 Against MinIO, writing a fixture and reading it back. The job's `defaults`, keyed by the name the workflow gave the action, keep the endpoint, the bucket and the credentials out of each step:
 
 ```yaml
+name: Fixtures
+actions:
+  s3: github.com/mozership/probe-s3@<commit SHA>
+vars:
+  minio_user: "{{MINIO_ROOT_USER}}"
+  minio_password: "{{MINIO_ROOT_PASSWORD}}"
+jobs:
 - name: fixtures
   defaults:
     s3:
@@ -191,7 +200,7 @@ The action keeps to the guard of the run, and its `action.yml` declares `guard: 
 - Under `--read-only`, only `get`, `head` and `list` are run. A `put` or a `delete` is refused before anything is sent, and before `file` is read.
 - Under `--allow-host`, every host a request goes to must be one the run allows: the host the bucket is addressed at, which on AWS is `<bucket>.s3.<region>.amazonaws.com`, or `s3.<region>.amazonaws.com` with `path_style`, and the host of each redirect. A URL without a port is taken at the port of its scheme: `80` for `http` and `443` for `https`. `--allow-host '*.amazonaws.com'` allows a bucket in whichever region it is.
 
-A refused step fails with the kind `refused`.
+A refused step fails with the kind `refused`. See [Guard](https://probe.linyo.ws/guide/concepts/guard).
 
 ## Releasing
 
