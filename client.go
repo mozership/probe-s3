@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -525,9 +526,7 @@ func (r *request) result(target *url.URL, region string, body *payload, res *ans
 		"status":  res.status,
 		"headers": flattenHeaders(res.headers),
 	}
-	for k, v := range res.fields {
-		out[k] = v
-	}
+	maps.Copy(out, res.fields)
 
 	status := 0
 	if res.code < 200 || res.code > 299 {
