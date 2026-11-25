@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/go-hclog"
-	"github.com/mozership/probe/actionrpc"
+	"github.com/mozership/probe/sdk"
 )
 
 // DefaultTimeout bounds a step that does not set with.timeout.
@@ -57,7 +57,7 @@ var params = []string{
 // keeps are the kinds of guard the action keeps to, as action.yml declares
 // them: it only reads under read-only, and connects only to a host the run
 // allows.
-var keeps = []string{actionrpc.KindReadOnly, actionrpc.KindAllowHost}
+var keeps = []string{sdk.KindReadOnly, sdk.KindAllowHost}
 
 // secretParams are the keys of with whose values are credentials, and are
 // kept out of the log.
@@ -88,7 +88,7 @@ type Action struct {
 
 // Run does the operation in with, under no guard.
 func (a *Action) Run(with map[string]any) (map[string]any, error) {
-	ret, _, err := a.RunStep(actionrpc.Call{With: with})
+	ret, _, err := a.RunStep(sdk.Call{With: with})
 	return ret, err
 }
 
@@ -96,11 +96,11 @@ func (a *Action) Run(with map[string]any) (map[string]any, error) {
 // the storage answers, what it answered is a result, a 404 or a 403
 // included; only a request that gets no answer, or a step the guard
 // refuses, is an error.
-func (a *Action) RunStep(call actionrpc.Call) (map[string]any, map[string]any, error) {
+func (a *Action) RunStep(call sdk.Call) (map[string]any, map[string]any, error) {
 	if a.log == nil {
 		a.log = hclog.NewNullLogger()
 	}
-	actionrpc.LogParams(a.log, "received request parameters", withoutSecrets(call.With))
+	sdk.LogParams(a.log, "received request parameters", withoutSecrets(call.With))
 
 	getenv := a.getenv
 	if getenv == nil {
@@ -114,7 +114,7 @@ func (a *Action) RunStep(call actionrpc.Call) (map[string]any, map[string]any, e
 		return nil, nil, err
 	}
 	ret, err := a.do(req, call.Guard)
-	actionrpc.LogOutcome(a.log, "s3 "+req.op, ret, err)
+	sdk.LogOutcome(a.log, "s3 "+req.op, ret, err)
 	return ret, nil, err
 }
 
@@ -133,11 +133,11 @@ func withoutSecrets(with map[string]any) map[string]any {
 
 // checkReadOnly returns a Refused error when the run is read-only and the
 // step writes to the bucket.
-func checkReadOnly(guard actionrpc.Guard, r *request) error {
+func checkReadOnly(guard sdk.Guard, r *request) error {
 	if !guard.ReadOnly || slices.Contains(readOperations, r.op) {
 		return nil
 	}
-	return actionrpc.Refuse("%s writes to the bucket, and the run is read-only; only %s are run", r.op, strings.Join(readOperations, ", "))
+	return sdk.Refuse("%s writes to the bucket, and the run is read-only; only %s are run", r.op, strings.Join(readOperations, ", "))
 }
 
 type request struct {

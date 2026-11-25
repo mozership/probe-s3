@@ -20,7 +20,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/mozership/probe/actionrpc"
+	"github.com/mozership/probe/sdk"
 )
 
 // maxRedirects is how many times a request is sent again to where the
@@ -40,7 +40,7 @@ const maxAnswer = 8 << 20
 // nothing is connected to around the guard.
 type guarded struct {
 	base  http.RoundTripper
-	guard actionrpc.Guard
+	guard sdk.Guard
 }
 
 func (g *guarded) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -52,7 +52,7 @@ func (g *guarded) RoundTrip(req *http.Request) (*http.Response, error) {
 
 // checkHost returns a Refused error when the guard does not allow the host
 // of u. A host without a port is taken at the port of its scheme.
-func checkHost(guard actionrpc.Guard, u *url.URL) error {
+func checkHost(guard sdk.Guard, u *url.URL) error {
 	host := u.Host
 	if u.Port() == "" {
 		port := "80"
@@ -175,7 +175,7 @@ func (r *request) method() string {
 	return http.MethodGet
 }
 
-func (a *Action) do(r *request, guard actionrpc.Guard) (map[string]any, error) {
+func (a *Action) do(r *request, guard sdk.Guard) (map[string]any, error) {
 	// Under read-only nothing of a put is read, a file included; the step
 	// was refused before it came here.
 	body, err := r.payload()
@@ -209,7 +209,7 @@ func (a *Action) do(r *request, guard actionrpc.Guard) (map[string]any, error) {
 		if err != nil {
 			// A host the guard refused is a refusal, not a failure to
 			// reach the storage.
-			if refused := (*actionrpc.Refused)(nil); errors.As(err, &refused) {
+			if refused := (*sdk.Refused)(nil); errors.As(err, &refused) {
 				return nil, refused
 			}
 			if ctx.Err() != nil {

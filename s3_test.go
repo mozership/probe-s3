@@ -24,8 +24,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/go-hclog"
-	"github.com/mozership/probe/actionref"
-	"github.com/mozership/probe/actionrpc"
+	"github.com/mozership/probe/sdk"
 )
 
 // object is what the stand-in for S3 keeps for a key.
@@ -626,7 +625,7 @@ func TestReadOnly(t *testing.T) {
 	s, endpoint := newStorage(t)
 	s.put("a", "x", "text/plain")
 	a := action()
-	guard := actionrpc.Guard{ReadOnly: true}
+	guard := sdk.Guard{ReadOnly: true}
 
 	for _, w := range []map[string]any{
 		{"put": "a", "body": "y"},
@@ -635,8 +634,8 @@ func TestReadOnly(t *testing.T) {
 		{"put": "a", "file": filepath.Join(t.TempDir(), "none")},
 		{"delete": "a"},
 	} {
-		_, _, err := a.RunStep(actionrpc.Call{With: with(endpoint, w), Guard: guard})
-		if !actionrpc.IsRefused(err) || !strings.Contains(err.Error(), "the run is read-only; only get, head, list are run") {
+		_, _, err := a.RunStep(sdk.Call{With: with(endpoint, w), Guard: guard})
+		if !sdk.IsRefused(err) || !strings.Contains(err.Error(), "the run is read-only; only get, head, list are run") {
 			t.Errorf("RunStep(%v) error = %v, want a refusal", w, err)
 		}
 	}
@@ -648,7 +647,7 @@ func TestReadOnly(t *testing.T) {
 	}
 
 	for _, w := range []map[string]any{{"get": "a"}, {"head": "a"}, {"list": ""}} {
-		ret, _, err := a.RunStep(actionrpc.Call{With: with(endpoint, w), Guard: guard})
+		ret, _, err := a.RunStep(sdk.Call{With: with(endpoint, w), Guard: guard})
 		if err != nil || ret["status"] != 0 {
 			t.Errorf("RunStep(%v) = %v, %v", w, ret, err)
 		}
@@ -664,14 +663,14 @@ func TestAllowHost(t *testing.T) {
 	host := strings.TrimPrefix(endpoint, "http://")
 	otherHost := strings.TrimPrefix(otherEndpoint, "http://")
 
-	ret, _, err := a.RunStep(actionrpc.Call{With: with(endpoint, map[string]any{"get": "a"}), Guard: actionrpc.Guard{AllowHosts: []string{host}}})
+	ret, _, err := a.RunStep(sdk.Call{With: with(endpoint, map[string]any{"get": "a"}), Guard: sdk.Guard{AllowHosts: []string{host}}})
 	if err != nil || ret["status"] != 0 {
 		t.Fatalf("RunStep() to an allowed host = %v, %v", ret, err)
 	}
 
 	for _, w := range []map[string]any{{"get": "a"}, {"head": "a"}, {"list": ""}, {"put": "a", "body": "y"}, {"delete": "a"}} {
-		_, _, err = a.RunStep(actionrpc.Call{With: with(endpoint, w), Guard: actionrpc.Guard{AllowHosts: []string{"storage.example.com"}}})
-		if !actionrpc.IsRefused(err) || !strings.Contains(err.Error(), host) {
+		_, _, err = a.RunStep(sdk.Call{With: with(endpoint, w), Guard: sdk.Guard{AllowHosts: []string{"storage.example.com"}}})
+		if !sdk.IsRefused(err) || !strings.Contains(err.Error(), host) {
 			t.Errorf("RunStep(%v) to a host not allowed error = %v, want a refusal naming %s", w, err, host)
 		}
 	}
@@ -687,8 +686,8 @@ func TestAllowHost(t *testing.T) {
 		return true
 	}
 	for _, w := range []map[string]any{{"get": "a"}, {"put": "a", "body": "y"}} {
-		_, _, err = a.RunStep(actionrpc.Call{With: with(endpoint, w), Guard: actionrpc.Guard{AllowHosts: []string{host}}})
-		if !actionrpc.IsRefused(err) || !strings.Contains(err.Error(), otherHost) {
+		_, _, err = a.RunStep(sdk.Call{With: with(endpoint, w), Guard: sdk.Guard{AllowHosts: []string{host}}})
+		if !sdk.IsRefused(err) || !strings.Contains(err.Error(), otherHost) {
 			t.Errorf("RunStep(%v) redirected to a host not allowed error = %v, want a refusal naming %s", w, err, otherHost)
 		}
 	}
@@ -696,7 +695,7 @@ func TestAllowHost(t *testing.T) {
 		t.Fatalf("%d requests followed the redirect to a host not allowed", n)
 	}
 
-	ret, _, err = a.RunStep(actionrpc.Call{With: with(endpoint, map[string]any{"get": "a"}), Guard: actionrpc.Guard{AllowHosts: []string{host, otherHost}}})
+	ret, _, err = a.RunStep(sdk.Call{With: with(endpoint, map[string]any{"get": "a"}), Guard: sdk.Guard{AllowHosts: []string{host, otherHost}}})
 	if err != nil || ret["res"].(map[string]any)["body"] != "moved" {
 		t.Fatalf("RunStep() redirected to an allowed host = %v, %v", ret, err)
 	}
@@ -818,8 +817,8 @@ func TestBucketOfAnotherRegion(t *testing.T) {
 	}
 
 	hosts = nil
-	_, _, err = a.RunStep(actionrpc.Call{With: w, Guard: actionrpc.Guard{AllowHosts: []string{"fixtures.s3.us-east-1.amazonaws.com"}}})
-	if !actionrpc.IsRefused(err) || !strings.Contains(err.Error(), "fixtures.s3.eu-west-1.amazonaws.com:443") {
+	_, _, err = a.RunStep(sdk.Call{With: w, Guard: sdk.Guard{AllowHosts: []string{"fixtures.s3.us-east-1.amazonaws.com"}}})
+	if !sdk.IsRefused(err) || !strings.Contains(err.Error(), "fixtures.s3.eu-west-1.amazonaws.com:443") {
 		t.Errorf("RunStep() error = %v, want a refusal naming the host of the other region", err)
 	}
 	if len(hosts) != 1 {
@@ -827,7 +826,7 @@ func TestBucketOfAnotherRegion(t *testing.T) {
 	}
 
 	// A wildcard allows the bucket in whichever region it is.
-	_, _, err = a.RunStep(actionrpc.Call{With: w, Guard: actionrpc.Guard{AllowHosts: []string{"*.amazonaws.com:443"}}})
+	_, _, err = a.RunStep(sdk.Call{With: w, Guard: sdk.Guard{AllowHosts: []string{"*.amazonaws.com:443"}}})
 	if err != nil {
 		t.Errorf("RunStep() under *.amazonaws.com error = %v", err)
 	}
@@ -870,7 +869,7 @@ func TestManifestsDeclare(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		m, err := actionref.ParseManifest(data)
+		m, err := sdk.ParseManifest(data)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
