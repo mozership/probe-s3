@@ -5,14 +5,14 @@ package main
 
 import (
 	"github.com/hashicorp/go-hclog"
-	"github.com/mozership/probe/actionrpc"
+	"github.com/mozership/probe/sdk"
 )
 
 // version is set at build time.
 var version = "dev"
 
 func main() {
-	actionrpc.Serve(func(log hclog.Logger) actionrpc.Action {
+	sdk.Serve(func(log hclog.Logger) sdk.Action {
 		return &Action{log: log}
 	})
 }
