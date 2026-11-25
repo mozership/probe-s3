@@ -1,5 +1,8 @@
 # probe-s3
 
+> [!NOTE]
+> [probe-aws](https://github.com/mozership/probe-aws) takes the place of probe-s3. Its `s3` does what probe-s3 does, with the same result, and it also calls SQS and any other API of AWS. A step moves its operation and the keys of the bucket under `s3`, and keeps the region, the endpoint, the credentials and the timeout where they were; see [Coming from probe-s3](https://github.com/mozership/probe-aws#coming-from-probe-s3). probe-s3 gets no new features.
+
 A [Probe](https://github.com/mozership/probe) action that reads and writes objects in S3 and in storage that speaks its protocol, such as MinIO, Cloudflare R2 or Versity Gateway, so a workflow can check what an API stored.
 
 It is an [external action](https://probe.linyo.ws/guide/concepts/actions#external-actions). Probe downloads it the first time a workflow uses it, and runs the executable whose SHA-256 the `action.yml` at the pinned commit names. It needs Probe v1.21.0 or later, which reads the guard and the params the action declares in `action.yml`.
